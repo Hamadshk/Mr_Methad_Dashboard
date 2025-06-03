@@ -9,8 +9,20 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.0.1",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/material": "^7.1.0",
+    "axios": "^1.9.0",
+    "chart.js": "^4.4.9",
+    "elevenlabs": "^1.59.0",
+    "lucide-react": "^0.511.0",
+    "next": "15.3.2",
+    "pdfkit": "^0.17.1",
     "react": "^19.0.0",
+    "react-chartjs-2": "^5.3.0",
+    "react-countup": "^6.5.3",
     "react-dom": "^19.0.0",
-    "next": "15.3.2"
+    "recharts": "^2.15.3"
   }
 }

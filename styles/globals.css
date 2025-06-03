@@ -10,10 +10,10 @@
   }
 }
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
+/* styles/globals.css */
+body, html {
+  padding: 0;
+  margin: 0;
 }
 
 body {
