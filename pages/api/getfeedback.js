@@ -1,4 +1,6 @@
 // pages/api/getfeedback.js
+import { OpenAI } from "openai";
+
 export default async function handler(req, res) {
     if (req.method !== 'GET') {
       return res.status(405).json({ message: 'Method not allowed' });
@@ -55,7 +57,27 @@ export default async function handler(req, res) {
       const data = await response.json();
       
       // Process and filter feedback submissions
-      const feedbackData = data.submissions
+      let openai = null;
+      let useAI = false;
+      
+      // Check if OpenAI API key is available
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (apiKey) {
+        try {
+          openai = new OpenAI({
+            apiKey: apiKey,
+          });
+          useAI = true;
+        } catch (error) {
+          console.warn("Failed to initialize OpenAI client:", error.message);
+          useAI = false;
+        }
+      } else {
+        console.warn("OpenAI API key not found in environment variables. Using fallback sentiment analysis.");
+      }
+      
+      // Process all submissions and filter for feedback
+      const feedbackPromises = data.submissions
         .filter(submission => {
           // Filter submissions that have feedback (field with feedback content)
           const others = submission.others || {};
@@ -75,7 +97,7 @@ export default async function handler(req, res) {
             others[fieldId].trim().length > 0
           );
         })
-        .map(submission => {
+        .map(async submission => {
           const others = submission.others || {};
           
           // Extract feedback text from known field IDs
@@ -91,7 +113,7 @@ export default async function handler(req, res) {
           for (const fieldId of feedbackFields) {
             if (others[fieldId] && typeof others[fieldId] === 'string') {
               feedbackText = others[fieldId].trim();
-              break;
+              if (feedbackText) break;
             }
           }
           
@@ -103,8 +125,18 @@ export default async function handler(req, res) {
           // Extract email for additional context
           const email = submission.email || others.email || '';
           
-          // Calculate a simple sentiment-based rating (you can enhance this)
-          const rating = calculateSentimentRating(feedbackText);
+          // Calculate rating based on availability of OpenAI
+          let rating;
+          if (useAI && openai) {
+            try {
+              rating = await calculateSentimentRatingWithAI(feedbackText, openai);
+            } catch (error) {
+              console.warn("AI rating failed, using fallback:", error.message);
+              rating = calculateSentimentRatingFallback(feedbackText);
+            }
+          } else {
+            rating = calculateSentimentRatingFallback(feedbackText);
+          }
           
           return {
             id: submission.id,
@@ -120,8 +152,13 @@ export default async function handler(req, res) {
             calendarName: others.calendar_name || '',
             selectedSlot: others.selected_slot || ''
           };
-        })
-        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // Sort by newest first
+        });
+      
+      // Wait for all ratings to be processed
+      const feedbackData = await Promise.all(feedbackPromises);
+      
+      // Sort by newest first
+      feedbackData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   
       // Calculate summary statistics
       const totalFeedbacks = feedbackData.length;
@@ -152,8 +189,7 @@ export default async function handler(req, res) {
               end: endAt
             }
           }
-        }
-      });
+        }      });
   
     } catch (error) {
       console.error('Error fetching feedback:', error);
@@ -163,62 +199,103 @@ export default async function handler(req, res) {
         message: error.message
       });
     }
-  }
+}
+
+// AI-powered sentiment analysis for rating calculation
+async function calculateSentimentRatingWithAI(text, openai) {
+  if (!text || typeof text !== 'string' || !text.trim()) return 3;
   
-  // Simple sentiment analysis for rating calculation
-  function calculateSentimentRating(text) {
-    if (!text || typeof text !== 'string') return 3;
-    
-    const lowerText = text.toLowerCase();
-    
-    // Positive indicators
-    const positiveWords = [
-      'excellent', 'outstanding', 'fantastic', 'amazing', 'wonderful', 'great',
-      'perfect', 'brilliant', 'awesome', 'incredible', 'superb', 'exceptional',
-      'love', 'impressed', 'satisfied', 'happy', 'pleased', 'delighted',
-      'professional', 'helpful', 'efficient', 'quick', 'fast', 'easy',
-      'smooth', 'seamless', 'natural', 'human-like', 'intelligent'
-    ];
-    
-    // Negative indicators
-    const negativeWords = [
-      'terrible', 'awful', 'horrible', 'bad', 'poor', 'disappointing',
-      'frustrating', 'annoying', 'slow', 'difficult', 'confusing',
-      'unhelpful', 'rude', 'unprofessional', 'failed', 'broken',
-      'buggy', 'glitchy', 'useless', 'waste', 'hate'
-    ];
-    
-    // Neutral/mixed indicators
-    const neutralWords = [
-      'okay', 'fine', 'decent', 'average', 'mixed', 'some issues',
-      'mostly good', 'generally', 'overall'
-    ];
-    
-    let positiveScore = 0;
-    let negativeScore = 0;
-    let neutralScore = 0;
-    
-    // Count positive words
-    positiveWords.forEach(word => {
-      if (lowerText.includes(word)) positiveScore++;
+  try {
+    const response = await openai.chat.completions.create({
+      messages: [
+        {
+          role: "system", 
+          content: "You are a sentiment analysis tool that evaluates customer feedback for a business. Rate the sentiment on a scale of 1 to 5 where 1 is extremely negative, 3 is neutral, and 5 is extremely positive. Only respond with the number rating."
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      model: "gpt-3.5-turbo",
+      temperature: 0.1,
+      max_tokens: 5,
     });
+
+    // Get the rating from the AI response
+    const aiRating = response.choices[0].message.content.trim();
     
-    // Count negative words
-    negativeWords.forEach(word => {
-      if (lowerText.includes(word)) negativeScore++;
-    });
+    // Convert to number and ensure it's within range 1-5
+    const numRating = parseInt(aiRating);
     
-    // Count neutral words
-    neutralWords.forEach(word => {
-      if (lowerText.includes(word)) neutralScore++;
-    });
-    
-    // Calculate rating based on sentiment
-    if (positiveScore > negativeScore + 1) {
-      return positiveScore >= 3 ? 5 : 4;
-    } else if (negativeScore > positiveScore + 1) {
-      return negativeScore >= 3 ? 1 : 2;
-    } else {
-      return 3; // Neutral or mixed sentiment
+    if (isNaN(numRating)) {
+      console.warn("AI returned non-numeric rating, defaulting to 3:", aiRating);
+      return 3;
     }
+    
+    return Math.max(1, Math.min(5, numRating)); // Ensure rating is between 1-5
+    
+  } catch (error) {
+    console.error("Error in AI sentiment analysis:", error);
+    // Fallback to simple keyword analysis
+    return calculateSentimentRatingFallback(text);
   }
+}
+
+// Fallback sentiment analysis using keywords (when OpenAI is not available)
+function calculateSentimentRatingFallback(text) {
+  if (!text || typeof text !== 'string') return 3;
+  
+  const lowerText = text.toLowerCase();
+  
+  // Positive indicators
+  const positiveWords = [
+    'excellent', 'outstanding', 'fantastic', 'amazing', 'wonderful', 'great',
+    'perfect', 'brilliant', 'awesome', 'incredible', 'superb', 'exceptional',
+    'love', 'impressed', 'satisfied', 'happy', 'pleased', 'delighted',
+    'professional', 'helpful', 'efficient', 'quick', 'fast', 'easy',
+    'smooth', 'seamless', 'natural', 'human-like', 'intelligent'
+  ];
+  
+  // Negative indicators
+  const negativeWords = [
+    'terrible', 'awful', 'horrible', 'bad', 'poor', 'disappointing',
+    'frustrating', 'annoying', 'slow', 'difficult', 'confusing',
+    'unhelpful', 'rude', 'unprofessional', 'failed', 'broken',
+    'buggy', 'glitchy', 'useless', 'waste', 'hate'
+  ];
+  
+  // Neutral/mixed indicators
+  const neutralWords = [
+    'okay', 'fine', 'decent', 'average', 'mixed', 'some issues',
+    'mostly good', 'generally', 'overall'
+  ];
+  
+  let positiveScore = 0;
+  let negativeScore = 0;
+  let neutralScore = 0;
+  
+  // Count positive words
+  positiveWords.forEach(word => {
+    if (lowerText.includes(word)) positiveScore++;
+  });
+  
+  // Count negative words
+  negativeWords.forEach(word => {
+    if (lowerText.includes(word)) negativeScore++;
+  });
+  
+  // Count neutral words
+  neutralWords.forEach(word => {
+    if (lowerText.includes(word)) neutralScore++;
+  });
+  
+  // Calculate rating based on sentiment
+  if (positiveScore > negativeScore + 1) {
+    return positiveScore >= 3 ? 5 : 4;
+  } else if (negativeScore > positiveScore + 1) {
+    return negativeScore >= 3 ? 1 : 2;
+  } else {
+    return 3; // Neutral or mixed sentiment
+  }
+}

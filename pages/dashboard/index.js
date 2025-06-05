@@ -1,7 +1,29 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 
+// Custom hook for client-side time display
+const useClientTime = () => {
+  const [currentTime, setCurrentTime] = useState('');
+  
+  useEffect(() => {
+    // Set initial time
+    setCurrentTime(new Date().toLocaleTimeString('en-US'));
+    
+    // Update time every minute
+    const interval = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString('en-US'));
+    }, 60000);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  return currentTime;
+};
+
 const Dashboard = () => {
+  // Use the custom hook for last updated time
+  const currentTime = useClientTime();
+  
   const [dashboardData, setDashboardData] = useState({
     totalCalls: 0,
     successfulCalls: 0,
@@ -27,72 +49,76 @@ const Dashboard = () => {
   });
   const [isLoadingFeedback, setIsLoadingFeedback] = useState(true);
 
-// Fixed generateReport function for the frontend
-const generateReport = async (type) => {
-  setIsGeneratingReport(true);
-  try {
-    // Prepare comprehensive data for the report
-    const reportData = {
-      ...dashboardData,
-      // Add any additional calculated metrics
-      successRate: dashboardData.totalCalls > 0 ? 
-        ((dashboardData.successfulCalls / dashboardData.totalCalls) * 100).toFixed(1) : '0',
-      bookingRate: dashboardData.successfulCalls > 0 ? 
-        ((dashboardData.bookingsGenerated / dashboardData.successfulCalls) * 100).toFixed(1) : '0',
-      // Add feedback data if available
-      feedbacks: feedbackData.map(f => `${f.customerName} (${f.rating}/5): "${f.feedback}"`),
-      averageRating: feedbackSummary.averageRating,
-      totalFeedbacks: feedbackSummary.totalFeedbacks,
-      generatedAt: new Date().toISOString(),
-      dateRange: dateRange
-    };
+  const [dateRange, setDateRange] = useState('thisMonth');
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [isLoadingCredits, setIsLoadingCredits] = useState(true); // New state for credits loading
 
-    console.log('Sending report data:', reportData); // Debug log
+  // Fixed generateReport function for the frontend
+  const generateReport = async (type) => {
+    setIsGeneratingReport(true);
+    try {
+      // Prepare comprehensive data for the report
+      const reportData = {
+        ...dashboardData,
+        // Add any additional calculated metrics
+        successRate: dashboardData.totalCalls > 0 ? 
+          ((dashboardData.successfulCalls / dashboardData.totalCalls) * 100).toFixed(1) : '0',
+        bookingRate: dashboardData.successfulCalls > 0 ? 
+          ((dashboardData.bookingsGenerated / dashboardData.successfulCalls) * 100).toFixed(1) : '0',
+        // Add feedback data if available
+        feedbacks: feedbackData.map(f => `${f.customerName} (${f.rating}/5): "${f.feedback}"`),
+        averageRating: feedbackSummary.averageRating,
+        totalFeedbacks: feedbackSummary.totalFeedbacks,
+        generatedAt: new Date().toISOString(),
+        dateRange: dateRange
+      };
 
-    const response = await fetch('/api/generateReport', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ 
-        type: type, 
-        range: dateRange, 
-        data: reportData 
-      }),
-    });
+      console.log('Sending report data:', reportData); // Debug log
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-    }
+      const response = await fetch('/api/generateReport', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          type: type, 
+          range: dateRange, 
+          data: reportData 
+        }),
+      });
 
-    const result = await response.json();
-    
-    if (result.success && result.downloadUrl) {
-      // Create a temporary link to download the file
-      const link = document.createElement('a');
-      link.href = result.downloadUrl;
-      link.download = result.downloadUrl.split('/').pop();
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
       
-      // Also open in new tab as backup
-      window.open(result.downloadUrl, '_blank');
-      
-      // Show success message (you can replace this with your preferred notification method)
-      console.log('Report generated successfully:', result.message);
-    } else {
-      throw new Error(result.error || 'Report generation failed');
+      if (result.success && result.downloadUrl) {
+        // Create a temporary link to download the file
+        const link = document.createElement('a');
+        link.href = result.downloadUrl;
+        link.download = result.downloadUrl.split('/').pop();
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Also open in new tab as backup
+        window.open(result.downloadUrl, '_blank');
+        
+        // Show success message (you can replace this with your preferred notification method)
+        console.log('Report generated successfully:', result.message);
+      } else {
+        throw new Error(result.error || 'Report generation failed');
+      }
+    } catch (err) {
+      console.error('Error generating report:', err);
+      // Show error message to user (you can replace this with your preferred notification method)
+      alert(`Failed to generate report: ${err.message}`);
+    } finally {
+      setIsGeneratingReport(false);
     }
-  } catch (err) {
-    console.error('Error generating report:', err);
-    // Show error message to user (you can replace this with your preferred notification method)
-    alert(`Failed to generate report: ${err.message}`);
-  } finally {
-    setIsGeneratingReport(false);
-  }
-};
+  };
   
 
   const getDateRangeParams = (range) => {
@@ -119,9 +145,6 @@ const generateReport = async (type) => {
 
     return { startTime, endTime };
   };
-
-  const [dateRange, setDateRange] = useState('thisMonth');
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   // Function to fetch feedback data
   const fetchFeedbackData = async () => {
@@ -230,8 +253,13 @@ const generateReport = async (type) => {
   }, [dateRange]);
 
   
-
+  // Using a client-side only time calculation to avoid hydration errors
   const formatTimeAgo = (timestamp) => {
+    // During SSR, return a placeholder and calculate on client side only
+    if (typeof window === 'undefined') {
+      return 'Recently';
+    }
+    
     const now = new Date();
     const time = new Date(timestamp);
     const diffInHours = Math.floor((now - time) / (1000 * 60 * 60));
@@ -240,7 +268,7 @@ const generateReport = async (type) => {
     if (diffInHours < 24) return `${diffInHours} hours ago`;
     return `${Math.floor(diffInHours / 24)} days ago`;
   };
-
+  // Using a consistent date formatter for both client and server
   const formatDate = (timestamp) => {
     return new Date(timestamp).toLocaleDateString('en-US', {
       month: 'short',
@@ -250,7 +278,6 @@ const generateReport = async (type) => {
   };
   const successRate = ((dashboardData.successfulCalls / dashboardData.totalCalls) * 100).toFixed(1);
   const bookingRate = ((dashboardData.bookingsGenerated / dashboardData.successfulCalls) * 100).toFixed(1);
-  const [isLoadingCredits, setIsLoadingCredits] = useState(true); // New state for credits loading
 
   return (
     <>
@@ -347,11 +374,10 @@ const generateReport = async (type) => {
           </div>
 
           {/* Performance Overview */}
-          <div className="performance-section">
-            <div className="section-header">
+          <div className="performance-section">            <div className="section-header">
               <h2>Performance Overview</h2>
               <div className="last-updated">
-                Last updated: {new Date().toLocaleTimeString()}
+                {currentTime ? `Last updated: ${currentTime}` : 'Last updated: Recently'}
               </div>
             </div>
             <div className="metric-card credits">
@@ -388,7 +414,7 @@ const generateReport = async (type) => {
                 </div>
                 <div className="stat-row">
                   <span>Transferred to Human</span>
-                  <span className="stat-value warning">{dashboardData.humanTransfers}</span>
+                  <span className="stat-value warning">{dashboardData.bookingsGenerated}</span>
                 </div>
                 <div className="progress-bar">
                   <div className="progress-fill" style={{width: `${successRate}%`}}></div>
