@@ -345,13 +345,6 @@ const Dashboard = () => {
               {isGeneratingReport ? 'Generating PDF...' : 'Generate PDF Report'}
             </button>
 
-            <button 
-              className="btn-secondary"
-              onClick={() => generateReport('excel')}
-              disabled={isGeneratingReport}
-            >
-              {isGeneratingReport ? 'Generating CSV...' : 'Export CSV'}
-            </button>
             </div>
           </div>
         </header>
