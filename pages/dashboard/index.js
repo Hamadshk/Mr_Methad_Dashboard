@@ -53,8 +53,7 @@ const Dashboard = () => {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isLoadingCredits, setIsLoadingCredits] = useState(true); // New state for credits loading
 
-  // Fixed generateReport function for the frontend
-  const generateReport = async (type) => {
+    const generateReport = async (type) => {
     setIsGeneratingReport(true);
     try {
       // Prepare comprehensive data for the report
@@ -73,7 +72,7 @@ const Dashboard = () => {
         dateRange: dateRange
       };
 
-      console.log('Sending report data:', reportData); // Debug log
+      console.log('Generating report...'); // Debug log
 
       const response = await fetch('/api/generateReport', {
         method: 'POST',
@@ -88,32 +87,58 @@ const Dashboard = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const result = await response.json();
+      // Get content disposition to extract filename
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = 'report';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=([^;]+)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/["']/g, '');
+        }
+      }
       
-      if (result.success && result.downloadUrl) {
-        // Create a temporary link to download the file
-        const link = document.createElement('a');
-        link.href = result.downloadUrl;
-        link.download = result.downloadUrl.split('/').pop();
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      // Get content type
+      const contentType = response.headers.get('content-type');
+      
+      // Get the blob from the response
+      const blob = await response.blob();
+      
+      try {
+        // Create a URL for the blob
+        const url = window.URL.createObjectURL(blob);
         
-        // Also open in new tab as backup
-        window.open(result.downloadUrl, '_blank');
+        // Create a link to download the file
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = filename;
         
-        // Show success message (you can replace this with your preferred notification method)
-        console.log('Report generated successfully:', result.message);
-      } else {
-        throw new Error(result.error || 'Report generation failed');
+        // Append to the document and click
+        document.body.appendChild(a);
+        a.click();
+        
+        // Clean up
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        }, 100);
+        
+        console.log('Report generated successfully');
+      } catch (error) {
+        console.error("Error creating object URL", error);
+        // Fallback: open in new tab if download link fails
+        const reader = new FileReader();
+        reader.onload = function() {
+          window.open(reader.result, '_blank');
+        };
+        reader.readAsDataURL(blob);
       }
     } catch (err) {
       console.error('Error generating report:', err);
-      // Show error message to user (you can replace this with your preferred notification method)
+      // Show error message to user
       alert(`Failed to generate report: ${err.message}`);
     } finally {
       setIsGeneratingReport(false);
@@ -312,8 +337,7 @@ const Dashboard = () => {
               <option value="lastMonth">Last Month</option>
             </select> */}
             
-            <div className="report-buttons">
-            <button 
+            <div className="report-buttons">            <button 
               className="btn-primary"
               onClick={() => generateReport('pdf')}
               disabled={isGeneratingReport}
@@ -321,13 +345,13 @@ const Dashboard = () => {
               {isGeneratingReport ? 'Generating PDF...' : 'Generate PDF Report'}
             </button>
 
-            {/* <button 
+            <button 
               className="btn-secondary"
               onClick={() => generateReport('excel')}
               disabled={isGeneratingReport}
             >
               {isGeneratingReport ? 'Generating CSV...' : 'Export CSV'}
-            </button> */}
+            </button>
             </div>
           </div>
         </header>
@@ -431,10 +455,6 @@ const Dashboard = () => {
                       <span key={i} className={i < Math.floor(dashboardData.customerSatisfaction) ? 'star filled' : 'star'}>★</span>
                     ))}
                   </div>
-                </div>
-                <div className="stat-row">
-                  <span>Avg. Call Duration</span>
-                  <span className="stat-value">{dashboardData.avgCallDuration}</span>
                 </div>
               </div>
 
